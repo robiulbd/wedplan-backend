@@ -2,6 +2,7 @@ import express from "express";
 import {
   createService,
   deleteService,
+  getAllServicesForAdmin,
   getMyVendorServices,
   getPublicServices,
   getServiceById,
@@ -14,6 +15,14 @@ const router = express.Router();
 
 // Public routes
 router.get("/", getPublicServices);
+
+// Admin private routes
+router.get(
+  "/admin/all",
+  verifyToken,
+  verifyRole("admin"),
+  getAllServicesForAdmin
+);
 
 // Vendor private routes
 router.get(

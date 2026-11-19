@@ -62,6 +62,44 @@ export const getPublicServices = async (req, res, next) => {
   }
 };
 
+// GET /api/services/admin/all (Admin: every service, any status)
+export const getAllServicesForAdmin = async (req, res, next) => {
+  try {
+    const { status = "", search = "" } = req.query;
+
+    const query = {};
+
+    if (
+      typeof status === "string" &&
+      status.trim() !== "" &&
+      status !== "all"
+    ) {
+      query.status = status.trim();
+    }
+
+    if (typeof search === "string" && search.trim() !== "") {
+      const term = search.trim();
+      query.$or = [
+        { serviceName: { $regex: term, $options: "i" } },
+        { vendorEmail: { $regex: term, $options: "i" } },
+        { location: { $regex: term, $options: "i" } },
+      ];
+    }
+
+    const services = await Service.find(query)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: services.length,
+      data: services,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // GET /api/services/:id (Public/Authenticated single service by ID)
 export const getServiceById = async (req, res, next) => {
   try {
@@ -244,8 +282,16 @@ export const updateService = async (req, res, next) => {
       });
     }
 
-    const { serviceName, category, description, price, location, images, isActive } =
-      req.body;
+    const {
+      serviceName,
+      category,
+      description,
+      price,
+      location,
+      images,
+      isActive,
+      status,
+    } = req.body;
 
     if (serviceName !== undefined) service.serviceName = String(serviceName).trim();
     if (category !== undefined) {
@@ -275,6 +321,17 @@ export const updateService = async (req, res, next) => {
     }
     if (typeof isActive === "boolean") {
       service.isActive = isActive;
+    }
+
+    // শুধুমাত্র অ্যাডমিন সার্ভিসের approval status পরিবর্তন করতে পারে
+    if (isAdmin && typeof status === "string") {
+      if (!["pending", "approved", "rejected"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid service status",
+        });
+      }
+      service.status = status;
     }
 
     // ভেন্ডর সার্ভিস আপডেট করলে পুনরায় অ্যাপ্রুভালের জন্য pending অবস্থায় রাখা (যদি এডমিন না হন)

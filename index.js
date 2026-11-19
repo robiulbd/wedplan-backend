@@ -4,15 +4,12 @@ import cors from "cors";
 import connectDB from "./src/config/db.js";
 import errorHandler from "./src/utils/errorHandler.js";
 import authTokenRoutes from "./src/routes/authTokenRoutes.js";
-const app = express();
-app.use("/api/auth", authTokenRoutes);
 import serviceRoutes from "./src/routes/serviceRoutes.js";
-app.use("/api/services", serviceRoutes);
-const PORT = process.env.PORT || 5000;
-// Connect Database
-connectDB();
 
-// Middlewares
+const app = express();
+
+// Global middlewares — these MUST run before the routes so that
+// req.body is populated and CORS headers are present on every response.
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
@@ -20,6 +17,10 @@ app.use(
   })
 );
 app.use(express.json());
+
+// Routes
+app.use("/api/auth", authTokenRoutes);
+app.use("/api/services", serviceRoutes);
 
 // Health Check Route
 app.get("/", (req, res) => {
@@ -31,6 +32,11 @@ app.get("/", (req, res) => {
 
 // Global Error Handler
 app.use(errorHandler);
+
+const PORT = process.env.PORT || 5000;
+
+// Connect Database
+connectDB();
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
