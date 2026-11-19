@@ -3,10 +3,12 @@ import express from "express";
 import cors from "cors";
 import connectDB from "./src/config/db.js";
 import errorHandler from "./src/utils/errorHandler.js";
-
+import authTokenRoutes from "./src/routes/authTokenRoutes.js";
 const app = express();
+app.use("/api/auth", authTokenRoutes);
+import serviceRoutes from "./src/routes/serviceRoutes.js";
+app.use("/api/services", serviceRoutes);
 const PORT = process.env.PORT || 5000;
-
 // Connect Database
 connectDB();
 
