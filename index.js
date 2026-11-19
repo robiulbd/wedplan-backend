@@ -5,6 +5,7 @@ import connectDB from "./src/config/db.js";
 import errorHandler from "./src/utils/errorHandler.js";
 import authTokenRoutes from "./src/routes/authTokenRoutes.js";
 import serviceRoutes from "./src/routes/serviceRoutes.js";
+import bookingRoutes from "./src/routes/bookingRoutes.js";
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.use(express.json());
 // Routes
 app.use("/api/auth", authTokenRoutes);
 app.use("/api/services", serviceRoutes);
+app.use("/api/bookings", bookingRoutes);
 
 // Health Check Route
 app.get("/", (req, res) => {
