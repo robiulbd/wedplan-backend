@@ -6,6 +6,7 @@ import errorHandler from "./src/utils/errorHandler.js";
 import authTokenRoutes from "./src/routes/authTokenRoutes.js";
 import serviceRoutes from "./src/routes/serviceRoutes.js";
 import bookingRoutes from "./src/routes/bookingRoutes.js";
+import stripeRoutes from "./src/routes/stripeRoutes.js";
 
 const app = express();
 
@@ -17,12 +18,18 @@ app.use(
     credentials: true,
   })
 );
+
+// Stripe webhooks need the RAW request body to verify signatures, so this
+// must be registered BEFORE express.json() parses the body.
+app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
+
 app.use(express.json());
 
 // Routes
 app.use("/api/auth", authTokenRoutes);
 app.use("/api/services", serviceRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/stripe", stripeRoutes);
 
 // Health Check Route
 app.get("/", (req, res) => {
