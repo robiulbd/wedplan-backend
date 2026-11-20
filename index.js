@@ -10,13 +10,23 @@ import stripeRoutes from "./src/routes/stripeRoutes.js";
 
 const app = express();
 
-// Global middlewares — these MUST run before the routes so that
-// req.body is populated and CORS headers are present on every response.
+// Make sure MongoDB is ready before any controller tries to use
+// mongoose.connection.db. In serverless this is cached across invocations.
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// CORS must run before the routes so every response carries the headers.
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     credentials: true,
-  })
+  }),
 );
 
 // Stripe webhooks need the RAW request body to verify signatures, so this
@@ -42,11 +52,13 @@ app.get("/", (req, res) => {
 // Global Error Handler
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
+// Vercel's zero-config Express support imports this default export. The
+// listener is only for local development (`npm run dev` / `npm start`).
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
 
-// Connect Database
-connectDB();
-
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+export default app;
