@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import Booking from "../models/Booking.js";
 import Service, { SERVICE_CATEGORIES } from "../models/Service.js";
 
 // GET /api/services (Public: approved & active services with search, filter, sort)
@@ -279,6 +280,18 @@ export const updateService = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: "Forbidden: You do not have permission to modify this service",
+      });
+    }
+
+    // Admin rejection is a hard delete: remove the service and any bookings
+    // that reference it so no orphan records are left behind.
+    if (isAdmin && req.body.status === "rejected") {
+      await Booking.deleteMany({ serviceId: id });
+      await service.deleteOne();
+
+      return res.status(200).json({
+        success: true,
+        message: "Service rejected and permanently deleted",
       });
     }
 
