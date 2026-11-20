@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import stripe from "../config/stripe.js";
 
 // CREATE /api/stripe/create-checkout-session
@@ -51,6 +52,56 @@ export async function createCheckoutSession(req, res, next) {
   }
 }
 
+// CREATE /api/stripe/create-subscription-session  (Vendor only, authenticated)
+export async function createSubscriptionSession(req, res, next) {
+  try {
+    const userId = req.user?.id;
+    const customerEmail = req.user?.email;
+    if (!userId || !customerEmail) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const priceInCents = Number(req.body?.priceInCents) || 2900;
+    if (priceInCents <= 0) {
+      return res.status(400).json({ error: "Invalid price" });
+    }
+
+    const clientUrl = process.env.CLIENT_URL || "http://localhost:3000";
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer_email: customerEmail,
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: Math.round(priceInCents),
+            product_data: {
+              name: "WedPlan Premium Vendor Subscription",
+              description:
+                "Unlimited service listings and promotional benefits (30 days)",
+            },
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${clientUrl}/dashboard/vendor/overview?subscription=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${clientUrl}/dashboard/vendor/overview?subscription=cancelled`,
+      metadata: {
+        type: "subscription",
+        plan: "premium",
+        userId,
+        email: customerEmail,
+      },
+    });
+
+    res.json({ sessionId: session.id, url: session.url });
+  } catch (error) {
+    console.error("❌ createSubscriptionSession error:", error.message);
+    res.status(500).json({ error: "Failed to create subscription session" });
+  }
+}
+
 // POST /api/stripe/webhook
 // NOTE: this route is mounted with express.raw() in index.js so that
 // req.body is a Buffer — Stripe signature verification needs the raw payload.
@@ -78,10 +129,43 @@ export async function handleWebhook(req, res) {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object;
+        const metadata = session.metadata || {};
         console.log(`✅ Checkout session completed: ${session.id}`);
         console.log(`   Amount total: ${session.amount_total}`);
-        console.log(`   Service ID: ${session.metadata?.serviceId || "n/a"}`);
-        // TODO: mark the booking/transaction as paid in MongoDB
+
+        if (metadata.type === "subscription" && metadata.plan === "premium") {
+          const userId = metadata.userId;
+          if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+            const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            const db = mongoose.connection.db;
+            if (db) {
+              await db.collection("user").updateOne(
+                { _id: new mongoose.Types.ObjectId(userId) },
+                {
+                  $set: {
+                    subscriptionPlan: "premium",
+                    subscriptionExpiresAt: expiresAt,
+                    updatedAt: new Date(),
+                  },
+                },
+              );
+              await db.collection("users").updateOne(
+                { _id: new mongoose.Types.ObjectId(userId) },
+                {
+                  $set: {
+                    subscriptionPlan: "premium",
+                    subscriptionExpiresAt: expiresAt,
+                    updatedAt: new Date(),
+                  },
+                },
+              );
+            }
+          }
+          console.log(`   Premium activated for user: ${userId || "n/a"}`);
+        } else {
+          console.log(`   Service ID: ${metadata.serviceId || "n/a"}`);
+          // TODO: mark the booking/transaction as paid in MongoDB
+        }
         break;
       }
       case "checkout.session.expired": {
@@ -100,4 +184,8 @@ export async function handleWebhook(req, res) {
   }
 }
 
-export default { createCheckoutSession, handleWebhook };
+export default {
+  createCheckoutSession,
+  createSubscriptionSession,
+  handleWebhook,
+};

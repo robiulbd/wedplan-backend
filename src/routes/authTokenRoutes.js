@@ -1,6 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
+import verifyRole from "../middlewares/verifyRole.js";
 import verifyToken from "../middlewares/verifyToken.js";
 
 const router = express.Router();
@@ -149,7 +150,139 @@ router.get("/me", verifyToken, async (req, res, next) => {
         role: user.role || "customer",
         isBlocked: Boolean(user.isBlocked),
         subscriptionPlan: user.subscriptionPlan || "free",
+        subscriptionExpiresAt: user.subscriptionExpiresAt || null,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Admin: list all registered users (optionally filtered by role)
+router.get("/users", verifyToken, verifyRole("admin"), async (req, res, next) => {
+  try {
+    if (!mongoose.connection.db) {
+      return res.status(500).json({ success: false, message: "Database not ready" });
+    }
+    const roleFilter =
+      typeof req.query.role === "string" ? req.query.role.trim() : "";
+    const query = {};
+    if (roleFilter) query.role = roleFilter;
+
+    const users = await mongoose.connection.db
+      .collection("user")
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const data = users.map((u) => ({
+      id: u._id.toString(),
+      name: u.name || "",
+      email: u.email || "",
+      role: u.role || "customer",
+      isBlocked: Boolean(u.isBlocked),
+      subscriptionPlan: u.subscriptionPlan || "free",
+      createdAt: u.createdAt || null,
+    }));
+
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Helper to locate a user document in either collection name
+async function findUserById(id) {
+  if (!mongoose.Types.ObjectId.isValid(id)) return null;
+  const objectId = new mongoose.Types.ObjectId(id);
+  const db = mongoose.connection.db;
+  let doc = await db.collection("user").findOne({ _id: objectId });
+  if (doc) return { collectionName: "user", user: doc };
+  doc = await db.collection("users").findOne({ _id: objectId });
+  if (doc) return { collectionName: "users", user: doc };
+  return null;
+}
+
+// Admin: block or unblock a user
+router.patch("/users/:id/block", verifyToken, verifyRole("admin"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { isBlocked } = req.body || {};
+    if (typeof isBlocked !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "isBlocked must be a boolean",
+      });
+    }
+
+    const found = await findUserById(id);
+    if (!found) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (found.user._id.toString() === req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot block or unblock your own account",
+      });
+    }
+
+    await mongoose.connection.db
+      .collection(found.collectionName)
+      .updateOne({ _id: found.user._id }, { $set: { isBlocked, updatedAt: new Date() } });
+
+    return res.status(200).json({
+      success: true,
+      message: isBlocked ? "User blocked" : "User unblocked",
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Admin: permanently delete a user and their related data
+router.delete("/users/:id", verifyToken, verifyRole("admin"), async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const found = await findUserById(id);
+    if (!found) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (found.user._id.toString() === req.user.id) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot delete your own account",
+      });
+    }
+
+    const db = mongoose.connection.db;
+    const userId = found.user._id.toString();
+    const userRole = found.user.role;
+
+    // Cascade delete related records
+    await db.collection("account").deleteMany({ userId: found.user._id });
+    await db.collection("session").deleteMany({ userId: found.user._id });
+    if (userRole === "vendor") {
+      const services = await db
+        .collection("services")
+        .find({ vendorId: userId })
+        .toArray();
+      const serviceIds = services.map((s) => s._id.toString());
+      await db.collection("services").deleteMany({ vendorId: userId });
+      if (serviceIds.length) {
+        await db.collection("bookings").deleteMany({
+          serviceId: { $in: serviceIds },
+        });
+      }
+    }
+    await db.collection("bookings").deleteMany({ customerId: userId });
+
+    await db.collection(found.collectionName).deleteOne({ _id: found.user._id });
+
+    return res.status(200).json({
+      success: true,
+      message: "User and related data deleted permanently",
     });
   } catch (error) {
     next(error);
